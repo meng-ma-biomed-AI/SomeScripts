@@ -1,0 +1,104 @@
+---
+title: "R Assessment"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+# generate table Patient Characteristics
+library(table1)
+library(dplyr)
+library(lubridate)
+
+data <- read.csv("patients.csv", header=TRUE)
+data <- data %>% mutate(data, age_diagnosis = as.numeric(round((ymd(diagnosis_dt) - ymd(birth_dt))/365.25, 2)) )
+data <- data %>% mutate(data, ttype = drugA + drugB + drugC)
+data <- data %>% mutate(data, typeName = case_when(
+  drugA == 0 & drugB == 0 & drugC == 0 ~ 'No Treatment',
+  ttype >= 2 ~ 'Combo Therapy',
+  drugA == 1 ~ 'DrugA',
+  drugB == 1 ~ 'DrugB',
+  drugC == 1 ~ 'DrugC'
+    )
+)
+
+data$typeName <- factor(data$typeName, levels = c('DrugA', 'DrugB', 'DrugC', 'Combo Therapy', 'No Treatment'))
+data$gender <- factor(data$gender, levels = c('F', 'M'), labels = c('Female', 'Male') )
+
+label(data$gender) <- 'Gender'
+label(data$age_diagnosis) <- 'Age at Diagnosis'
+
+table1(~ gender + age_diagnosis | typeName, data = data, overall='Total', render.continuous = c( .="Median [Q1, Q3]",  .="Mean (SD)") )
+```
+
+```{r}
+# create a logistic regression model
+library(broom)
+
+data$typeName <- factor(data$typeName, levels = c('No Treatment', 'DrugA', 'DrugB', 'DrugC', 'Combo Therapy'))
+model <- glm(overall_response ~ typeName + age_diagnosis, data = data, family = binomial(link = 'logit'))
+
+tidy_results <- tidy(model, conf.int = TRUE)
+
+tidy_results$oddsratio = exp(tidy_results$estimate)
+
+formatted_table <- knitr::kable(tidy_results[, c("term", "estimate", "std.error", "oddsratio", "conf.low", "conf.high", "p.value")],
+                                col.names = c("Variable", "Coefficient", "Std. Error", "Odds Ratio", "95% CI (Lower)", "95% CI (Upper)", "P-value"))
+print(formatted_table)
+```
+
+```{r}
+# Kaplan-Meier plot
+library(survival)
+library(ggplot2)
+library(survminer, quietly = TRUE)
+
+data <- data %>% 
+  mutate(data, censor = case_when(
+            is.na(death_dt) ~ 2,
+            !is.na(death_dt) ~ 1
+    )) %>%
+  mutate(data, overall_survival = case_when(
+            censor == 1 ~ ymd(death_dt) - ymd(diagnosis_dt),     
+            censor == 2 ~ ymd(last_visit_dt) - ymd(diagnosis_dt)
+      )
+  )
+
+survdata = filter(data, id != 1212)
+
+fit <- survfit(Surv(overall_survival, censor) ~ typeName, data = survdata)
+
+ggsurvplot(fit, data = survdata, censor.shape="|", censor.size=1, 
+           palette = "lancet", 
+           legend = c(.7,.7), 
+           xlab="Overall_Survival (Days)",
+           risk.table = TRUE, 
+           tables.height = 0.4,
+           tables.theme = theme_cleantable(),
+           font.x = c(10, "bold"),
+           font.y = c(10, "bold"),
+           surv.median.line = "hv"
+           )
+
+```
+
+
+
+```{r}
+# medial overall survival time and 95% CI, which are shown in the columns: median, 0.95LCL, 0.95UCL
+print(fit)
+
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
